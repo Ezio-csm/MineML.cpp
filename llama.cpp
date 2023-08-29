@@ -81,18 +81,27 @@
 #endif
 
 // tensor names
-#define TN_TOKEN_EMBD  "token_embd.weight"
-#define TN_OUTPUT_NORM "output_norm.weight"
-#define TN_OUTPUT      "output.weight"
-#define TN_ATTN_NORM   "blk.%d.attn_norm.weight"
-#define TN_ATTN_Q      "blk.%d.attn_q.weight"
-#define TN_ATTN_K      "blk.%d.attn_k.weight"
-#define TN_ATTN_V      "blk.%d.attn_v.weight"
-#define TN_ATTN_OUTPUT "blk.%d.attn_output.weight"
-#define TN_FFN_NORM    "blk.%d.ffn_norm.weight"
-#define TN_FFN_GATE    "blk.%d.ffn_gate.weight"
-#define TN_FFN_DOWN    "blk.%d.ffn_down.weight"
-#define TN_FFN_UP      "blk.%d.ffn_up.weight"
+#define TN_TOKEN_EMBD    "token_embd.weight"
+#define TN_OUTPUT        "output.weight"
+#define TN_OUTPUT_NORM   "output_norm.weight"
+#define TN_ATTN_NORM     "blk.%d.attn_norm.weight"
+#define TN_ATTN_Q        "blk.%d.attn_q.weight"
+#define TN_ATTN_K        "blk.%d.attn_k.weight"
+#define TN_ATTN_V        "blk.%d.attn_v.weight"
+#define TN_ATTN_OUTPUT   "blk.%d.attn_output.weight"
+#define TN_FFN_NORM      "blk.%d.ffn_norm.weight"
+#define TN_FFN_DOWN      "blk.%d.ffn_down.weight"
+#define TN_FFN_UP        "blk.%d.ffn_up.weight"
+
+#define TN_OUTPUT_NORM_B "output_norm.bias"
+#define TN_ATTN_NORM_B   "blk.%d.attn_norm.bias"
+#define TN_ATTN_Q_B      "blk.%d.attn_q.bias"
+#define TN_ATTN_K_B      "blk.%d.attn_k.bias"
+#define TN_ATTN_V_B      "blk.%d.attn_v.bias"
+#define TN_ATTN_OUTPUT_B "blk.%d.attn_output.bias"
+#define TN_FFN_NORM_B    "blk.%d.ffn_norm.bias"
+#define TN_FFN_DOWN_B    "blk.%d.ffn_down.bias"
+#define TN_FFN_UP_B      "blk.%d.ffn_up.bias"
 
 #ifdef __GNUC__
 #ifdef __MINGW32__
@@ -642,20 +651,28 @@ struct llama_hparams {
 struct llama_layer {
     // normalization
     struct ggml_tensor * attention_norm;
+    struct ggml_tensor * attention_norm_b;
 
     // attention
     struct ggml_tensor * wq;
+    struct ggml_tensor * wq_b;
     struct ggml_tensor * wk;
+    struct ggml_tensor * wk_b;
     struct ggml_tensor * wv;
+    struct ggml_tensor * wv_b;
     struct ggml_tensor * wo;
+    struct ggml_tensor * wo_b;
 
     // normalization
     struct ggml_tensor * ffn_norm;
+    struct ggml_tensor * ffn_norm_b;
 
     // ff
-    struct ggml_tensor * w1;
+    // struct ggml_tensor * w1;
     struct ggml_tensor * w2;
+    struct ggml_tensor * w2_b;
     struct ggml_tensor * w3;
+    struct ggml_tensor * w3_b;
 };
 
 struct llama_kv_cache {
@@ -720,6 +737,7 @@ struct llama_model {
     struct ggml_tensor * tok_embeddings;
 
     struct ggml_tensor * norm;
+    struct ggml_tensor * norm_b;
     struct ggml_tensor * output;
 
     std::vector<llama_layer> layers;
@@ -1535,10 +1553,12 @@ static void llama_model_load_internal(
                 backend_output = GGML_BACKEND_CPU;
             }
 
-            model.norm   = ml->create_tensor(ctx, TN_OUTPUT_NORM, {n_embd},          backend_norm);
-            model.output = ml->create_tensor(ctx, TN_OUTPUT,      {n_embd, n_vocab}, backend_output);
+            model.norm   = ml->create_tensor(ctx, TN_OUTPUT_NORM,   {n_embd},          backend_norm);
+            model.norm_b = ml->create_tensor(ctx, TN_OUTPUT_NORM_B, {n_embd},          backend_norm);
+            model.output = ml->create_tensor(ctx, TN_OUTPUT,        {n_embd, n_vocab}, backend_output);
             if (backend_norm == GGML_BACKEND_GPU) {
                 vram_weights += ggml_nbytes(model.norm);
+                vram_weights += ggml_nbytes(model.norm_b);
             }
             if (backend_output == GGML_BACKEND_GPU_SPLIT) {
                 vram_weights += ggml_nbytes(model.output);
@@ -1555,24 +1575,35 @@ static void llama_model_load_internal(
             const ggml_backend backend_split = int(i) < i_gpu_start ? GGML_BACKEND_CPU : LLAMA_BACKEND_OFFLOAD_SPLIT; // NOLINT
 
             auto & layer = model.layers[i];
-            layer.attention_norm = ml->create_tensor(ctx, format(TN_ATTN_NORM, i), {n_embd}, backend);
+            layer.attention_norm   = ml->create_tensor(ctx, format(TN_ATTN_NORM, i),   {n_embd}, backend);
+            layer.attention_norm_b = ml->create_tensor(ctx, format(TN_ATTN_NORM_B, i), {n_embd}, backend);
 
-            layer.wq = ml->create_tensor(ctx, format(TN_ATTN_Q, i),      {n_embd, n_embd},     backend_split);
-            layer.wk = ml->create_tensor(ctx, format(TN_ATTN_K, i),      {n_embd, n_embd_gqa}, backend_split);
-            layer.wv = ml->create_tensor(ctx, format(TN_ATTN_V, i),      {n_embd, n_embd_gqa}, backend_split);
-            layer.wo = ml->create_tensor(ctx, format(TN_ATTN_OUTPUT, i), {n_embd, n_embd},     backend_split);
+            layer.wq   = ml->create_tensor(ctx, format(TN_ATTN_Q, i),        {n_embd, n_embd},     backend_split);
+            layer.wq_b = ml->create_tensor(ctx, format(TN_ATTN_Q_B, i),      {n_embd},             backend_split);
+            layer.wk   = ml->create_tensor(ctx, format(TN_ATTN_K, i),        {n_embd, n_embd_gqa}, backend_split);
+            layer.wk_b = ml->create_tensor(ctx, format(TN_ATTN_K_B, i),      {n_embd},             backend_split);
+            layer.wv   = ml->create_tensor(ctx, format(TN_ATTN_V, i),        {n_embd, n_embd_gqa}, backend_split);
+            layer.wv_b = ml->create_tensor(ctx, format(TN_ATTN_V_B, i),      {n_embd},             backend_split);
+            layer.wo   = ml->create_tensor(ctx, format(TN_ATTN_OUTPUT, i),   {n_embd, n_embd},     backend_split);
+            layer.wo_b = ml->create_tensor(ctx, format(TN_ATTN_OUTPUT_B, i), {n_embd},             backend_split);
 
-            layer.ffn_norm = ml->create_tensor(ctx, format(TN_FFN_NORM, i), {n_embd}, backend);
+            layer.ffn_norm   = ml->create_tensor(ctx, format(TN_FFN_NORM, i),   {n_embd}, backend);
+            layer.ffn_norm_b = ml->create_tensor(ctx, format(TN_FFN_NORM_B, i), {n_embd}, backend);
 
-            layer.w1 = ml->create_tensor(ctx, format(TN_FFN_GATE, i), {n_embd,   n_ff}, backend_split);
-            layer.w2 = ml->create_tensor(ctx, format(TN_FFN_DOWN, i), {  n_ff, n_embd}, backend_split);
-            layer.w3 = ml->create_tensor(ctx, format(TN_FFN_UP, i),   {n_embd,   n_ff}, backend_split);
+            // layer.w1 = ml->create_tensor(ctx, format(TN_FFN_GATE, i), {n_embd,   n_ff}, backend_split);
+            layer.w2   = ml->create_tensor(ctx, format(TN_FFN_DOWN, i),   {n_ff, n_embd}, backend_split);
+            layer.w2_b = ml->create_tensor(ctx, format(TN_FFN_DOWN_B, i), {n_embd},       backend_split);
+            layer.w3   = ml->create_tensor(ctx, format(TN_FFN_UP, i),     {n_embd, n_ff}, backend_split);
+            layer.w3_b = ml->create_tensor(ctx, format(TN_FFN_UP_B, i),   {n_ff},         backend_split);
 
             if (backend == GGML_BACKEND_GPU) {
                 vram_weights +=
                     ggml_nbytes(layer.attention_norm) + ggml_nbytes(layer.wq) + ggml_nbytes(layer.wk)             +
                     ggml_nbytes(layer.wv)             + ggml_nbytes(layer.wo) + ggml_nbytes(layer.ffn_norm) +
-                    ggml_nbytes(layer.w1)             + ggml_nbytes(layer.w2) + ggml_nbytes(layer.w3);
+                    ggml_nbytes(layer.w2) + ggml_nbytes(layer.w3) +
+                    ggml_nbytes(layer.attention_norm_b) + ggml_nbytes(layer.wq_b) + ggml_nbytes(layer.wk_b)             +
+                    ggml_nbytes(layer.wv_b)             + ggml_nbytes(layer.wo_b) + ggml_nbytes(layer.ffn_norm_b) +
+                    ggml_nbytes(layer.w2_b) + ggml_nbytes(layer.w3_b);
             }
         }
     }
@@ -1725,7 +1756,7 @@ static struct ggml_cgraph * llama_build_graph(
 
     const float freq_base    = hparams.rope_freq_base;
     const float freq_scale   = hparams.rope_freq_scale;
-    const float norm_rms_eps = hparams.f_norm_rms_eps;
+    // const float norm_rms_eps = hparams.f_norm_rms_eps;
 
     const int n_gpu_layers = model.n_gpu_layers;
 
@@ -1816,12 +1847,14 @@ static struct ggml_cgraph * llama_build_graph(
 
         // norm
         {
-            cur = ggml_rms_norm(ctx0, inpL, norm_rms_eps);
-            offload_func(cur);
-            ggml_set_name(cur, "rms_norm_0");
+            cur = ggml_norm(ctx0, inpL);
+            offload_func_nr(cur);
+            ggml_set_name(cur, "norm_0");
 
-            // cur = cur*attention_norm(broadcasted)
-            cur = ggml_mul(ctx0, cur, model.layers[il].attention_norm);
+            // cur = attention_norm*cur + attention_norm_b
+            cur = ggml_add(ctx0,
+                    ggml_mul(ctx0, ggml_repeat(ctx0, model.layers[il].attention_norm, cur), cur),
+                    ggml_repeat(ctx0, model.layers[il].attention_norm_b, cur));
             offload_func(cur);
             ggml_set_name(cur, "attention_norm_0");
         }
@@ -1831,9 +1864,13 @@ static struct ggml_cgraph * llama_build_graph(
             // compute Q and K and RoPE them
             struct ggml_tensor * tmpk = ggml_mul_mat(ctx0, model.layers[il].wk, cur);
             offload_func_kq(tmpk);
+            tmpk = ggml_add(ctx0, tmpk, ggml_repeat(ctx0, model.layers[il].wk_b, tmpk));
+            offload_func_kq(tmpk);
             ggml_set_name(tmpk, "tmpk");
 
             struct ggml_tensor * tmpq = ggml_mul_mat(ctx0, model.layers[il].wq, cur);
+            offload_func_kq(tmpq);
+            tmpq = ggml_add(ctx0, tmpq, ggml_repeat(ctx0, model.layers[il].wq_b, tmpq));
             offload_func_kq(tmpq);
             ggml_set_name(tmpq, "tmpq");
 
@@ -1850,6 +1887,8 @@ static struct ggml_cgraph * llama_build_graph(
                 // compute the transposed [N, n_embd] V matrix
 
                 struct ggml_tensor * tmpv = ggml_mul_mat(ctx0, model.layers[il].wv, cur);
+                offload_func_v(tmpv);
+                tmpv = ggml_add(ctx0, tmpv, ggml_repeat(ctx0, model.layers[il].wv_b, tmpv));
                 offload_func_v(tmpv);
                 ggml_set_name(tmpv, "tmpv");
 
@@ -1944,9 +1983,9 @@ static struct ggml_cgraph * llama_build_graph(
             ggml_set_name(cur, "KQV_merged_contiguous");
 
             // projection (no bias)
-            cur = ggml_mul_mat(ctx0,
-                    model.layers[il].wo,
-                    cur);
+            cur = ggml_mul_mat(ctx0, model.layers[il].wo, cur);
+            offload_func(cur);
+            cur = ggml_add(ctx0, cur, ggml_repeat(ctx0, model.layers[il].wo_b, cur));
             offload_func(cur);
             ggml_set_name(cur, "result_wo");
         }
@@ -1959,40 +1998,32 @@ static struct ggml_cgraph * llama_build_graph(
         {
             // norm
             {
-                cur = ggml_rms_norm(ctx0, inpFF, norm_rms_eps);
-                offload_func(cur);
-                ggml_set_name(cur, "rms_norm_1");
+                cur = ggml_norm(ctx0, inpFF);
+                offload_func_nr(cur);
+                ggml_set_name(cur, "norm_1");
 
-                // cur = cur*ffn_norm(broadcasted)
-                cur = ggml_mul(ctx0, cur, model.layers[il].ffn_norm);
+                // cur = ffn_norm*cur + ffn_norm_b
+                cur = ggml_add(ctx0,
+                    ggml_mul(ctx0, ggml_repeat(ctx0, model.layers[il].ffn_norm, cur), cur),
+                    ggml_repeat(ctx0, model.layers[il].ffn_norm_b, cur));
                 offload_func(cur);
                 ggml_set_name(cur, "ffn_norm");
             }
 
-            struct ggml_tensor * tmp = ggml_mul_mat(ctx0,
-                    model.layers[il].w3,
-                    cur);
-            offload_func(tmp);
-            ggml_set_name(tmp, "result_w3");
-
-            cur = ggml_mul_mat(ctx0,
-                    model.layers[il].w1,
-                    cur);
+            cur = ggml_mul_mat(ctx0, model.layers[il].w3, cur);
             offload_func(cur);
-            ggml_set_name(cur, "result_w1");
-
-            // SILU activation
-            cur = ggml_silu(ctx0, cur);
+            cur = ggml_add(ctx0, cur, ggml_repeat(ctx0, model.layers[il].w3_b, cur));
             offload_func(cur);
-            ggml_set_name(cur, "silu");
+            ggml_set_name(cur, "result_w3");
 
-            cur = ggml_mul(ctx0, cur, tmp);
+            // GELU activation
+            cur = ggml_gelu(ctx0, cur);
             offload_func(cur);
-            ggml_set_name(cur, "silu_x_result_w3");
+            ggml_set_name(cur, "gelu");
 
-            cur = ggml_mul_mat(ctx0,
-                    model.layers[il].w2,
-                    cur);
+            cur = ggml_mul_mat(ctx0, model.layers[il].w2, cur);
+            offload_func(cur);
+            cur = ggml_add(ctx0, cur, ggml_repeat(ctx0, model.layers[il].w2_b, cur));
             offload_func(cur);
             ggml_set_name(cur, "result_w2");
         }
@@ -2007,12 +2038,14 @@ static struct ggml_cgraph * llama_build_graph(
 
     // norm
     {
-        cur = ggml_rms_norm(ctx0, inpL, norm_rms_eps);
+        cur = ggml_norm(ctx0, inpL);
         offload_func_nr(cur);
-        ggml_set_name(cur, "rms_norm_2");
+        ggml_set_name(cur, "norm_2");
 
-        // cur = cur*norm(broadcasted)
-        cur = ggml_mul(ctx0, cur, model.norm);
+        // cur = norm*cur + norm_b
+        cur = ggml_add(ctx0,
+                ggml_mul(ctx0, ggml_repeat(ctx0, model.norm, cur), cur),
+                ggml_repeat(ctx0, model.norm_b, cur));
         // offload_func_nr(cur); // TODO CPU + GPU mirrored backend
         ggml_set_name(cur, "result_norm");
     }
@@ -2022,7 +2055,7 @@ static struct ggml_cgraph * llama_build_graph(
     ggml_set_name(cur, "result_output");
 
     // logits -> probs
-    //cur = ggml_soft_max_inplace(ctx0, cur);
+    // cur = ggml_soft_max_inplace(ctx0, cur);
 
     ggml_build_forward_expand(gf, cur);
 
@@ -2150,6 +2183,7 @@ static bool llama_eval_internal(
     // requires GGML_PERF to be defined
     ggml_graph_print(gf);
 #endif
+    // ggml_graph_print(gf);
 
     // plot the computation graph in dot format (for debugging purposes)
     //if (n_past%100 == 0) {

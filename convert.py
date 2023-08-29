@@ -118,15 +118,26 @@ class Params:
     @staticmethod
     def guessed(model: 'LazyModel') -> 'Params':
         # try transformer naming first
-        n_vocab, n_embd = model["model.embed_tokens.weight"].shape if "model.embed_tokens.weight" in model else model["tok_embeddings.weight"].shape
+        model = model['language_model']
+        model = model['encoder']
+        # model = model['word_embeddings']w
+        # model = model['weight']
+        for t, y in model.items():
+            print(t, y.shape)
+        # print(model.keys())
+        # print()
+        
+        # n_vocab, n_embd = model["model.embed_tokens.weight"].shape if "model.embed_tokens.weight" in model else model["tok_embeddings.weight"].shape
+        n_vocab, n_embd = 102400, 2560
 
         # try transformer naming first
-        if "model.layers.0.self_attn.q_proj.weight" in model:
-            n_layer=next(i for i in itertools.count() if f"model.layers.{i}.self_attn.q_proj.weight" not in model)
-        elif "model.layers.0.self_attn.W_pack.weight" in model:   # next: try baichuan naming
-            n_layer=next(i for i in itertools.count() if f"model.layers.{i}.self_attn.W_pack.weight" not in model)
-        else:
-            n_layer=next(i for i in itertools.count() if f"layers.{i}.attention.wq.weight" not in model)
+        # if "model.layers.0.self_attn.q_proj.weight" in model:
+        #     n_layer=next(i for i in itertools.count() if f"model.layers.{i}.self_attn.q_proj.weight" not in model)
+        # elif "model.layers.0.self_attn.W_pack.weight" in model:   # next: try baichuan naming
+        #     n_layer=next(i for i in itertools.count() if f"model.layers.{i}.self_attn.W_pack.weight" not in model)
+        # else:
+        #     n_layer=next(i for i in itertools.count() if f"layers.{i}.attention.wq.weight" not in model)
+        n_layer = 32
 
         if n_layer < 1:
             raise Exception("failed to guess 'n_layer'. This model is unknown or unsupported.\n"
@@ -136,15 +147,16 @@ class Params:
         n_mult = 256           # guessed
 
         # TODO: verify this
-        n_ff = int(2 * (4 * n_embd) / 3)
-        n_ff = n_mult * ((n_ff + n_mult - 1) // n_mult)
+        # n_ff = int(2 * (4 * n_embd) / 3)
+        # n_ff = n_mult * ((n_ff + n_mult - 1) // n_mult)
+        n_ff = 10240
 
         return Params(
             n_vocab    = n_vocab,
             n_embd     = n_embd,
             n_mult     = n_mult,
             n_layer    = n_layer,
-            n_ctx      = -1,
+            n_ctx      = 4096,
             n_ff       = n_ff,
             n_head     = n_head,
             n_head_kv  = n_head,
@@ -825,6 +837,7 @@ class OutputFile:
         of.close()
 
 def pick_output_type(model: LazyModel, output_type_str: Optional[str]) -> GGMLFileType:
+    # wq_type = model[NAMES[gguf.MODEL_TENSOR.ATTN_Q].format(bid=0)+".weight"].data_type
     wq_type = model[NAMES[gguf.MODEL_TENSOR.ATTN_Q].format(bid=0)+".weight"].data_type
 
     if output_type_str == "f32" or (output_type_str is None and wq_type == DT_F32):
@@ -843,7 +856,42 @@ def convert_to_output_type(model: LazyModel, output_type: GGMLFileType) -> LazyM
 def convert_model_names(model: LazyModel, params: Params) -> LazyModel:
     tmap = gguf.get_tensor_name_map(ARCH, params.n_layer)
 
-    tmp = model
+    # print(tmap)
+    tmp1 = {'model.embed_tokens.weight': model['language_model']['embedding']['word_embeddings']['weight']}
+    model = model['language_model']['encoder']
+    # for t in model.keys():
+    #     print(t)
+    # print()
+    # for t in tmap:
+    #     if(t.endswith('query_key_value')):
+    #         print(t)
+
+    for i in range(params.n_layer):
+        u, v = f'layers.{i}.input_layernorm.', f'model.layers.{i}.input_layernorm.'
+        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+        u, v = f'layers.{i}.self_attention.query.', f'layers.{i}.attention.wq.'
+        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+        u, v = f'layers.{i}.self_attention.key.', f'layers.{i}.attention.wk.'
+        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+        u, v = f'layers.{i}.self_attention.value.', f'layers.{i}.attention.wv.'
+        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+        u, v = f'layers.{i}.self_attention.dense.', f'transformer.h.{i}.self_attention.dense.'
+        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+
+        u, v = f'layers.{i}.self_attention.rotary_emb.inv_freq', f'model.layers.{i}.self_attn.rotary_emb.inv_freq'
+        tmp1[v] = model[u]
+
+        u, v = f'layers.{i}.post_attention_layernorm.', f'model.layers.{i}.post_attention_layernorm.'
+        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+        u, v = f'layers.{i}.mlp.dense_h_to_4h.', f'transformer.h.{i}.mlp.dense_h_to_4h.'
+        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+        u, v = f'layers.{i}.mlp.dense_4h_to_h.', f'transformer.h.{i}.mlp.dense_4h_to_h.'
+        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+
+    u, v = 'final_layernorm.', 'gpt_neox.final_layer_norm.'
+    tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
+    tmp1['embed_out.weight'] = tmp1['model.embed_tokens.weight']
+    model = tmp1
 
     # HF models permut or pack some of the tensors, so we need to undo that
     for i in itertools.count():
@@ -863,6 +911,7 @@ def convert_model_names(model: LazyModel, params: Params) -> LazyModel:
     out: LazyModel = {}
     for name, lazy_tensor in model.items():
         name_new = name
+        # print(name)
 
         if name in tmap:
             name_new = tmap[name]
@@ -952,7 +1001,8 @@ def load_vocab(path: Path, vocabtype: Optional[str]) -> Union[BpeVocab, Sentence
     # a directory, it might be the model directory, and tokenizer.model might
     # be in the parent of that.
     if path.is_dir():
-        vocab_file = "tokenizer.model"
+        # vocab_file = "tokenizer.model"
+        vocab_file = "2_7B_vocab.model"
         if vocabtype == 'bpe':
             vocab_file = "vocab.json"
         path2 = path / vocab_file

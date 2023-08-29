@@ -78,13 +78,28 @@ fname_out = sys.argv[1] + "/ggml-model-" + ftype_str[ftype] + ".gguf"
 
 print("gguf: loading model "+last_dir)
 
-with open(dir_model + "/config.json", "r", encoding="utf-8") as f:
-    hparams = json.load(f)
+# with open(dir_model + "/config.json", "r", encoding="utf-8") as f:
+#     hparams = json.load(f)
 
-if hparams["architectures"][0] != "GPTNeoXForCausalLM":
-    print("Model architecture not supported: " + hparams["architectures"][0])
+hparams = {
+    'num_hidden_layers': 32,
+    'hidden_size': 2560,
+    'activation': 'gelu',
+    'num_attention_heads': 20,
+    'intermediate_size': 10240,
+    'vocab_size': 102400,
+    'max_position_embeddings': 4096,
+    'layer_norm_eps': 1e-5,
+    'gpt_j-residual': False,
+    'rotary_pct': 1.0,
+    'rotary_compress': 1.0,
+    'max_sequence_length': 4096
+}
 
-    sys.exit()
+# if hparams["architectures"][0] != "GPTNeoXForCausalLM":
+#     print("Model architecture not supported: " + hparams["architectures"][0])
+
+#     sys.exit()
 
 # get number of model parts
 num_parts = count_model_parts(dir_model)
@@ -199,7 +214,7 @@ tensor_map = gguf.get_tensor_name_map(ARCH,block_count)
 print("gguf: get tensor metadata")
 
 if num_parts == 0:
-    part_names = ("pytorch_model.bin",)
+    part_names = ("2_7B_ckpt.pt",)
 else:
     part_names = (
         f"pytorch_model-{n:05}-of-{num_parts:05}.bin" for n in range(1, num_parts + 1)
@@ -208,6 +223,14 @@ else:
 for part_name in part_names:
     print("gguf: loading model part '" + part_name + "'")
     model_part = torch.load(f"{dir_model}/{part_name}", map_location="cpu")
+
+    tmp1 = {'model.embed_tokens.weight': model_part['language_model']['embedding']['word_embeddings']['weight']}
+    model_part = model_part['language_model']
+    model_part = model_part['encoder']
+    for k, v in model_part.items():
+        tmp1[k] = v
+    tmp1['embed_out.weight'] = tmp1['model.embed_tokens.weight']
+    model_part = tmp1
 
     for name in model_part.keys():
         data = model_part[name]
