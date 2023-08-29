@@ -31,8 +31,6 @@ build-sanitize-thread/
 out/
 tmp/
 
-output_log
-
 models/*
 models-mnt
 
