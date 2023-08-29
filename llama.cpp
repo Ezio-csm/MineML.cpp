@@ -605,17 +605,17 @@ enum e_model {
 static const size_t kB = 1024;
 static const size_t MB = 1024*1024;
 
-// default hparams (LLaMA 7B)
+// default hparams (WeLM 3.7B)
 struct llama_hparams {
-    uint32_t n_vocab     = 32000;
-    uint32_t n_ctx_train = 2048;  // the context size used during training
-    uint32_t n_ctx       = 512;   // the context size used during inference
-    uint32_t n_embd      = 4096;
-    uint32_t n_head      = 32;
-    uint32_t n_head_kv   = 32;
+    uint32_t n_vocab     = 102400;
+    uint32_t n_ctx_train = 4096;  // the context size used during training
+    uint32_t n_ctx       = 4096;   // the context size used during inference
+    uint32_t n_embd      = 2560;
+    uint32_t n_head      = 20;
+    uint32_t n_head_kv   = 20;
     uint32_t n_layer     = 32;
     uint32_t n_rot       = 64;
-    uint32_t n_ff        = 11008;
+    uint32_t n_ff        = 10240;
 
     float f_norm_rms_eps = 1e-5;
 
@@ -1982,7 +1982,7 @@ static struct ggml_cgraph * llama_build_graph(
             offload_func_v(cur);
             ggml_set_name(cur, "KQV_merged_contiguous");
 
-            // projection (no bias)
+            // projection
             cur = ggml_mul_mat(ctx0, model.layers[il].wo, cur);
             offload_func(cur);
             cur = ggml_add(ctx0, cur, ggml_repeat(ctx0, model.layers[il].wo_b, cur));

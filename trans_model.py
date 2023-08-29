@@ -2,8 +2,8 @@ import torch
 
 n_embd = 2560
 
-PATH = './models/WeLM/2_7B_ckpt.pt'
-PATH2 = './2_7B_ckpt.pt'
+PATH = '../2_7B_ckpt.pt'
+PATH2 = './models/WeLM/2_7B_ckpt.pt'
 
 model = torch.load(PATH)
 tmp = model['language_model']['encoder']
