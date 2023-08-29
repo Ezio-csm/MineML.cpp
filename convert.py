@@ -838,7 +838,7 @@ class OutputFile:
 
 def pick_output_type(model: LazyModel, output_type_str: Optional[str]) -> GGMLFileType:
     # wq_type = model[NAMES[gguf.MODEL_TENSOR.ATTN_Q].format(bid=0)+".weight"].data_type
-    wq_type = model[NAMES[gguf.MODEL_TENSOR.ATTN_Q].format(bid=0)+".weight"].data_type
+    wq_type = model[NAMES[gguf.MODEL_TENSOR.ATTN_QKV].format(bid=0)+".weight"].data_type
 
     if output_type_str == "f32" or (output_type_str is None and wq_type == DT_F32):
         return GGMLFileType.AllF32
@@ -869,11 +869,7 @@ def convert_model_names(model: LazyModel, params: Params) -> LazyModel:
     for i in range(params.n_layer):
         u, v = f'layers.{i}.input_layernorm.', f'model.layers.{i}.input_layernorm.'
         tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
-        u, v = f'layers.{i}.self_attention.query.', f'layers.{i}.attention.wq.'
-        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
-        u, v = f'layers.{i}.self_attention.key.', f'layers.{i}.attention.wk.'
-        tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
-        u, v = f'layers.{i}.self_attention.value.', f'layers.{i}.attention.wv.'
+        u, v = f'layers.{i}.self_attention.query_key_value.', f'gpt_neox.layers.{i}.attention.query_key_value.'
         tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']
         u, v = f'layers.{i}.self_attention.dense.', f'transformer.h.{i}.self_attention.dense.'
         tmp1[v+'weight'], tmp1[v+'bias'] = model[u+'weight'], model[u+'bias']

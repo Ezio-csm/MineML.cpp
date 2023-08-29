@@ -116,6 +116,7 @@ MODEL_TENSOR_NAMES = {
         MODEL_TENSOR.ATTN_Q:        "blk.{bid}.attn_q",
         MODEL_TENSOR.ATTN_K:        "blk.{bid}.attn_k",
         MODEL_TENSOR.ATTN_V:        "blk.{bid}.attn_v",
+        MODEL_TENSOR.ATTN_QKV:      "blk.{bid}.attn_qkv",
         MODEL_TENSOR.ATTN_OUT:      "blk.{bid}.attn_output",
         MODEL_TENSOR.ATTN_ROT_EMBD: "blk.{bid}.attn_rot_embd",
         MODEL_TENSOR.FFN_NORM:      "blk.{bid}.ffn_norm",
